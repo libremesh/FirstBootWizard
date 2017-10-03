@@ -76,3 +76,9 @@ IPADDR=$(ping6 -n -L -c 1 ${count:+-c 2} -w 1 ff02::2%$iface | grep "^64 bytes" 
 wget http://$IPADDR:8080/ -o /tmp/config.tmp.zip
 ```
 
+# Dependencies
+
+# libiwinfo-lua
+local iwinfo = require("iwinfo")
+networks = iwinfo.wext.scanlist("wlan0")
+networks = iwinfo.nl80211.scanlist("wlan0")

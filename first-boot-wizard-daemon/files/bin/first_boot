@@ -1,0 +1,173 @@
+#!/bin/lua
+
+ft = require('firstbootwizard.functools')
+iwinfo = require("iwinfo")
+
+function split(str, sep)
+    local sep, fields = sep or ":", {}
+    local pattern = string.format("([^%s]+)", sep)
+    str:gsub(pattern, function(c) fields[#fields+1] = c end)
+    return fields
+end
+
+
+function execute(cmd)
+    local f = assert(io.popen(cmd, 'r'))
+    local s = assert(f:read('*a'))
+    f:close()
+    return s
+end
+
+-- get neighbouring nodes
+
+-- search for 802.11s and adhoc networks
+
+function get_phys()
+    return split(execute("ls /sys/class/ieee80211"), "\n")
+end
+
+function get_networks(phys)
+    all_networks = {}
+    for idx, phy in pairs(phys) do
+        networks = iwinfo.nl80211.scanlist(phy)
+        for k,network in pairs(networks) do
+            network["phy"] = phy
+            all_networks[#all_networks+1] = network
+        end
+    end
+    return all_networks
+end
+
+-- connect to network
+
+function chan_to_freq(chan)
+    if chan < 14 then return 2412 + 5 * (chan - 1) end
+    if chan == 14 then return 2482 end
+end 
+
+function connect_adhoc(mesh_network)
+    execute("iw "..mesh_network.phy.." set type ibss; ip link set "..mesh_network.phy.." up; iw dev "..mesh_network.phy.." ibss join "..mesh_network.ssid.." "..chan_to_freq(mesh_network.channel).." HT20 "..chan_to_freq(mesh_network.channel).." "..mesh_network.bssid)
+end
+
+function connect_11s(mesh_network)
+    print("connect_11s:"..mesh_network.channel )
+    execute("cp /etc/config/wireless /tmp/wireless-temp")
+    local f = io.open("/etc/config/wireless", "w")
+    local s = f:write(string.format([[
+config wifi-device 'radio0'
+        option type 'mac80211'
+        option channel '%s'
+        option hwmode '11g'
+        option path 'platform/ar933x_wmac'
+        option htmode 'HT20'
+        option disabled '0'
+        option distance '1000'
+        option noscan '1'
+        option country 'US'
+
+config wifi-iface 'lm_wlan0_mesh_radio0'
+        option mode 'mesh'
+        option device 'radio0'
+        option ifname 'wlan0-mesh'
+        option network 'lm_net_wlan0_mesh'
+        option distance '1000'
+        option mesh_fwding '0'
+        option mesh_id 'LiMe'
+    ]], mesh_network.channel))
+    f:close()
+    execute("wifi down; wifi up;")
+
+    -- execute("iw phy "..mesh_network.phy.." interface add mesh type mp mesh_id \"LiMe\";")
+    -- print("in between")
+    -- execute(" iw dev mesh set channel "..mesh_network.channel.."; ifconfig mesh up")
+    -- execute("ls")
+    execute("cp /tmp/wireless-temp /etc/config/wireless")
+    print("/connect_11s:"..mesh_network.channel )
+end
+
+function connect(mesh_network)
+    if mesh_network.mode == "Mesh Point" then
+        connect_11s(mesh_network)
+    elseif mesh_network.mode == "Ad-Hoc" then
+        connect_adhoc(mesh_network)
+    end
+end
+
+function get_hosts(iface)
+    return ft.filter(function(o) return o ~= "" end, split(execute("ping6 -n -L -c 1 ${count:+-c 2} -w 1 ff02::2%"..iface.." | grep \"^64 bytes\" | awk '{print $4}' | sed \"s/:$/%"..iface.."/\""), "\n"))
+end
+
+function fetch_config(host)
+    filename = "/tmp/lime-defaults-"..host
+    output = execute("wget http://["..host.."]/lime-defaults -O "..filename)
+    if string.find(output, "refused") == nil then
+        return nil
+    end
+    return filename
+end
+
+function get_configs(mesh_network)
+    connect(mesh_network)
+    hosts = get_hosts("mesh")
+    if(#hosts > 0) then
+        configs = ft.map(fetch_config, hosts)
+        -- removing nil configs
+        return ft.filter(function(el) return el ~= nil end, configs)
+    else
+        return {}
+    end
+
+end
+
+function unpack_table(t)
+    unpacked = {}
+    for k,v in ipairs(t) do
+        for sk, sv in ipairs(v) do
+            unpacked[#unpacked+1] = sv
+        end
+    end
+    return unpacked
+end
+
+
+if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
+
+    phys = get_phys()
+    if (#phys == 0) then
+        print ("no wireless cards.")
+        return
+    else
+        print("cards found:"..#phys)
+    end
+    networks = get_networks(phys)
+    if (#networks == 0) then
+        print("no networks found.")
+        return
+    else
+        print("networks found:"..#networks)
+    end
+
+    all_mesh = ft.filter(function(row, index) return row.mode=="Mesh Point" end, networks)
+    all_adhoc = ft.filter(function(row, index) return row.mode=="Ad-Hoc" end, networks)
+
+    if (#all_mesh == 0) then
+        print("no mesh network found.")
+        return
+    else
+        print("mesh networks found:"..#all_mesh)
+    end
+
+    all_mesh_configs = unpack_table(ft.map(get_configs, all_mesh))
+    -- all_adhoc_configs = unpack_table(ft.map(get_configs, all_adhoc))
+
+    -- apply config
+
+    if (#all_mesh_configs > 0) then
+        execute("cp "..all_mesh_configs[1].." /etc/config/lime-default")
+        execute("/rom/etc/uci-defaults/91_lime-config")
+        execute("rm /var/lock/first_run")
+        execute("reboot")
+    else
+        print("no config found")
+    end
+end
