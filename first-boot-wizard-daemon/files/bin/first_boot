@@ -49,14 +49,21 @@ function connect_adhoc(mesh_network)
     execute("iw "..mesh_network.phy.." set type ibss; ip link set "..mesh_network.phy.." up; iw dev "..mesh_network.phy.." ibss join "..mesh_network.ssid.." "..chan_to_freq(mesh_network.channel).." HT20 "..chan_to_freq(mesh_network.channel).." "..mesh_network.bssid)
 end
 
+function backup_wifi_config()
+    execute("cp /etc/config/wireless /tmp/wireless-temp")
+end
+
+function restore_wifi_config()
+    execute("cp /tmp/wireless-temp /etc/config/wireless")
+end
+
 function connect_11s(mesh_network)
     print("connect_11s:"..mesh_network.channel )
-    execute("cp /etc/config/wireless /tmp/wireless-temp")
     local f = io.open("/etc/config/wireless", "w")
-    local s = f:write(string.format([[
+    local command = string.format([[
 config wifi-device 'radio0'
         option type 'mac80211'
-        option channel '%s'
+        option channel '%i'
         option hwmode '11g'
         option path 'platform/ar933x_wmac'
         option htmode 'HT20'
@@ -68,20 +75,23 @@ config wifi-device 'radio0'
 config wifi-iface 'lm_wlan0_mesh_radio0'
         option mode 'mesh'
         option device 'radio0'
-        option ifname 'wlan0-mesh'
+        option ifname 'mesh0'
         option network 'lm_net_wlan0_mesh'
         option distance '1000'
         option mesh_fwding '0'
         option mesh_id 'LiMe'
-    ]], mesh_network.channel))
+    ]], mesh_network.channel)
+    local s = f:write(command)
     f:close()
     execute("wifi down; wifi up;")
+    print("connected to:"..mesh_network.channel )
+    print("wait a few seconds..")
 
     -- execute("iw phy "..mesh_network.phy.." interface add mesh type mp mesh_id \"LiMe\";")
     -- print("in between")
     -- execute(" iw dev mesh set channel "..mesh_network.channel.."; ifconfig mesh up")
     -- execute("ls")
-    execute("cp /tmp/wireless-temp /etc/config/wireless")
+    execute("sleep 4")
     print("/connect_11s:"..mesh_network.channel )
 end
 
@@ -99,21 +109,24 @@ end
 
 function fetch_config(host)
     filename = "/tmp/lime-defaults-"..host
-    output = execute("wget http://["..host.."]/lime-defaults -O "..filename)
-    if string.find(output, "refused") == nil then
+    execute("wget http://["..host.."]/lime-defaults -O "..filename.."2>&1")
+    if "1\n" == execute("if [ -e "..filename.." ]; then echo '1'; fi") then
+        return filename
+    else
         return nil
     end
-    return filename
 end
 
 function get_configs(mesh_network)
     connect(mesh_network)
-    hosts = get_hosts("mesh")
+    hosts = get_hosts("mesh0")
     if(#hosts > 0) then
         configs = ft.map(fetch_config, hosts)
+        print("configs:"..#configs)
         -- removing nil configs
         return ft.filter(function(el) return el ~= nil end, configs)
     else
+        print ( "no hosts in network in channel"..mesh_network.channel)
         return {}
     end
 
@@ -157,7 +170,10 @@ if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
         print("mesh networks found:"..#all_mesh)
     end
 
+    backup_wifi_config()
     all_mesh_configs = unpack_table(ft.map(get_configs, all_mesh))
+    restore_wifi_config()
+    execute("wifi down; wifi up;")
     -- all_adhoc_configs = unpack_table(ft.map(get_configs, all_adhoc))
 
     -- apply config
