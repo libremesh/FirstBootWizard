@@ -43,7 +43,10 @@ end
 function chan_to_freq(chan)
     if chan < 14 then return 2412 + 5 * (chan - 1) end
     if chan == 14 then return 2482 end
-end 
+    if chan < 229 and chan > 31 then
+        return 5160 + 5 * (chan - 32)
+    end
+end
 
 function connect_adhoc(mesh_network)
     execute("iw "..mesh_network.phy.." set type ibss; ip link set "..mesh_network.phy.." up; iw dev "..mesh_network.phy.." ibss join "..mesh_network.ssid.." "..chan_to_freq(mesh_network.channel).." HT20 "..chan_to_freq(mesh_network.channel).." "..mesh_network.bssid)
@@ -87,10 +90,7 @@ config wifi-iface 'lm_wlan0_mesh_radio0'
     print("connected to:"..mesh_network.channel )
     print("wait a few seconds..")
 
-    -- execute("iw phy "..mesh_network.phy.." interface add mesh type mp mesh_id \"LiMe\";")
-    -- print("in between")
-    -- execute(" iw dev mesh set channel "..mesh_network.channel.."; ifconfig mesh up")
-    -- execute("ls")
+    -- The sleep comes because it takes some time to discover the mesh nodes
     execute("sleep 4")
     print("/connect_11s:"..mesh_network.channel )
 end
@@ -142,6 +142,38 @@ function unpack_table(t)
     return unpacked
 end
 
+function hash_file(file)
+    return execute("md5sum "..file.." | awk '{print $1}'")
+end
+
+function are_files_different(file1, file2)
+    return hash_file(file1) ~= hash_file(file2)
+end
+
+function clean_lime_config()
+    local f = io.open("/etc/config/lime", "w")
+    local command = [[
+# Read the documentation in /docs directory
+# and on http://libremesh.org
+
+### System options
+
+config lime system
+
+
+### Network general option
+
+config lime network
+
+
+### WiFi general options
+
+config lime wifi
+    ]]
+    local s = f:write(command)
+    f:close()
+
+end
 
 if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
 
@@ -171,18 +203,33 @@ if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
     end
 
     backup_wifi_config()
-    all_mesh_configs = unpack_table(ft.map(get_configs, all_mesh))
+
+    packed_mesh_configs = ft.map(get_configs, all_mesh)
+    all_mesh_configs = unpack_table(packed_mesh_configs)
+
     restore_wifi_config()
+
+    packed_adhoc_configs = ft.map(get_configs, all_adhoc)
+    all_adhoc_configs = unpack_table(packed_adhoc_configs)
+
     execute("wifi down; wifi up;")
-    -- all_adhoc_configs = unpack_table(ft.map(get_configs, all_adhoc))
+
+    all_configs = unpack_table({all_mesh_configs, all_adhoc_configs})
 
     -- apply config
 
-    if (#all_mesh_configs > 0) then
-        execute("cp "..all_mesh_configs[1].." /etc/config/lime-default")
-        execute("/rom/etc/uci-defaults/91_lime-config")
-        execute("rm /var/lock/first_run")
-        execute("reboot")
+    if (#all_configs > 0) then
+        for k, config in ipairs(all_configs) do
+            if (are_files_different('/etc/config/lime-default', config)) then
+                execute("cp "..all_mesh_configs[1].." /etc/config/lime-defaults")
+                clean_lime_config()
+                execute("/rom/etc/uci-defaults/91_lime-config")
+                execute("rm /var/lock/first_run")
+                execute("reboot")
+            else
+                print("Config "..config.." is same as mine. Will try with the next one.")
+            end
+        end
     else
         print("no config found")
     end
