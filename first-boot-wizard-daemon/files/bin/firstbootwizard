@@ -1,7 +1,12 @@
 #!/bin/lua
 
-ft = require('firstbootwizard.functools')
-iwinfo = require("iwinfo")
+local ft = require('firstbootwizard.functools')
+local iwinfo = require("iwinfo")
+local fs = require("nixio.fs")
+
+function file_exists(filename)
+    return fs.stat(filename, "type") == "reg"
+end
 
 function split(str, sep)
     local sep, fields = sep or ":", {}
@@ -9,7 +14,6 @@ function split(str, sep)
     str:gsub(pattern, function(c) fields[#fields+1] = c end)
     return fields
 end
-
 
 function execute(cmd)
     local f = assert(io.popen(cmd, 'r'))
@@ -49,6 +53,7 @@ function chan_to_freq(chan)
 end
 
 function connect_adhoc(mesh_network)
+    print("connect_adhoc channel: "..mesh_network.channel)
     execute("iw "..mesh_network.phy.." set type ibss; ip link set "..mesh_network.phy.." up; iw dev "..mesh_network.phy.." ibss join "..mesh_network.ssid.." "..chan_to_freq(mesh_network.channel).." HT20 "..chan_to_freq(mesh_network.channel).." "..mesh_network.bssid)
 end
 
@@ -61,7 +66,7 @@ function restore_wifi_config()
 end
 
 function connect_11s(mesh_network)
-    print("connect_11s:"..mesh_network.channel )
+    print("connect_11s channel: "..mesh_network.channel )
     local f = io.open("/etc/config/wireless", "w")
     local command = string.format([[
 config wifi-device 'radio0'
@@ -92,7 +97,7 @@ config wifi-iface 'lm_wlan0_mesh_radio0'
 
     -- The sleep comes because it takes some time to discover the mesh nodes
     execute("sleep 4")
-    print("/connect_11s:"..mesh_network.channel )
+    print("/connect_11s: "..mesh_network.channel )
 end
 
 function connect(mesh_network)
@@ -108,25 +113,28 @@ function get_hosts(iface)
 end
 
 function fetch_config(host)
+    print("fetch_config:"..host)
     filename = "/tmp/lime-defaults-"..host
-    execute("wget http://["..host.."]/lime-defaults -O "..filename.."2>&1")
-    if "1\n" == execute("if [ -e "..filename.." ]; then echo '1'; fi") then
+    execute("wget http://["..host.."]/lime-defaults -O "..filename.." 2>&1")
+    if file_exists(filename) then
+        print('file fetched: '..filename)
         return filename
     else
+        print('file not fetched: '..filename)
         return nil
     end
 end
 
 function get_configs(mesh_network)
     connect(mesh_network)
-    hosts = get_hosts("mesh0")
+    hosts = get_hosts("mesh0") --TODO replace mesh0 with appropiate iface
     if(#hosts > 0) then
         configs = ft.map(fetch_config, hosts)
-        print("configs:"..#configs)
+        print("Configs fetched: "..#configs)
         -- removing nil configs
         return ft.filter(function(el) return el ~= nil end, configs)
     else
-        print ( "no hosts in network in channel"..mesh_network.channel)
+        print ( "No hosts in network in channel: "..mesh_network.channel)
         return {}
     end
 
@@ -175,21 +183,28 @@ config lime wifi
 
 end
 
-if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
+function apply_config(config)
+    execute("cp "..config.." /etc/config/lime-defaults")
+    clean_lime_config()
+    execute("/rom/etc/uci-defaults/91_lime-config")
+    execute("rm /var/lock/first_run")
+    execute("reboot")
+end
 
+function first_run()
     phys = get_phys()
     if (#phys == 0) then
         print ("no wireless cards.")
         return
     else
-        print("cards found:"..#phys)
+        print("cards found: "..#phys)
     end
     networks = get_networks(phys)
     if (#networks == 0) then
         print("no networks found.")
         return
     else
-        print("networks found:"..#networks)
+        print("networks found: "..#networks)
     end
 
     all_mesh = ft.filter(function(row, index) return row.mode=="Mesh Point" end, networks)
@@ -199,7 +214,7 @@ if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
         print("no mesh network found.")
         return
     else
-        print("mesh networks found:"..#all_mesh)
+        print("mesh networks found: "..#all_mesh)
     end
 
     backup_wifi_config()
@@ -219,13 +234,14 @@ if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
     -- apply config
 
     if (#all_configs > 0) then
+        print("going over "..#all_configs.." configs.")
         for k, config in ipairs(all_configs) do
-            if (are_files_different('/etc/config/lime-default', config)) then
-                execute("cp "..all_mesh_configs[1].." /etc/config/lime-defaults")
-                clean_lime_config()
-                execute("/rom/etc/uci-defaults/91_lime-config")
-                execute("rm /var/lock/first_run")
-                execute("reboot")
+            print("testing "..config)
+            if (are_files_different('/etc/config/lime-defaults', config)) then
+                print(config)
+
+                print('apply config: '..config)
+                apply_config(config)
             else
                 print("Config "..config.." is same as mine. Will try with the next one.")
             end
@@ -233,4 +249,12 @@ if "1\n" == execute("if [ -e /var/lock/first_run ]; then echo '1'; fi") then
     else
         print("no config found")
     end
+end
+
+print("[FBW] start.")
+if file_exists("/var/lock/first_run") then
+    print("[FBW] Lock exists, first run running")
+    first_run()
+else
+    print("[FBW] Lock doesn't exist. To run recreate empty file /var/lock/first_run.")
 end
