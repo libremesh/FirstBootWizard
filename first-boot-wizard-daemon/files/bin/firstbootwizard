@@ -1,8 +1,17 @@
-#!/bin/lua
+#!/usr/bin/lua
 
 local ft = require('firstbootwizard.functools')
 local iwinfo = require("iwinfo")
 local fs = require("nixio.fs")
+
+-- for each key in values, replace {key} with related value
+function template(str, values)
+    local res = str
+    for key, value in pairs(values) do
+        res = string.gsub(res, "{"..key.."}", value)
+    end
+    return res
+end
 
 function file_exists(filename)
     return fs.stat(filename, "type") == "reg"
@@ -26,6 +35,11 @@ end
 
 -- search for 802.11s and adhoc networks
 
+function phy_to_idx(phy)
+    local substr = string.gsub(phy, "phy", "")
+    return tonumber(substr)
+end
+
 function get_phys()
     return split(execute("ls /sys/class/ieee80211"), "\n")
 end
@@ -36,6 +50,7 @@ function get_networks(phys)
         networks = iwinfo.nl80211.scanlist(phy)
         for k,network in pairs(networks) do
             network["phy"] = phy
+            network["phy_idx"] = phy_to_idx(phy)
             all_networks[#all_networks+1] = network
         end
     end
@@ -52,9 +67,43 @@ function chan_to_freq(chan)
     end
 end
 
+function lsplit(mlstring)
+    return split(mlstring, "\n")
+end
+
 function connect_adhoc(mesh_network)
-    print("connect_adhoc channel: "..mesh_network.channel)
-    execute("iw "..mesh_network.phy.." set type ibss; ip link set "..mesh_network.phy.." up; iw dev "..mesh_network.phy.." ibss join "..mesh_network.ssid.." "..chan_to_freq(mesh_network.channel).." HT20 "..chan_to_freq(mesh_network.channel).." "..mesh_network.bssid)
+    print("connect_adhoc: "..mesh_network.channel )
+    local f = io.open("/etc/config/wireless", "w")
+    local command = template([[
+config wifi-device 'radio{phy_idx}'
+        option type 'mac80211'
+        option channel '{channel}'
+        option hwmode '11g'
+        option path 'platform/ar933x_wmac'
+        option htmode 'HT20'
+        option disabled '0'
+        option distance '1000'
+        option noscan '1'
+
+config wifi-iface 'lm_wlan0_adhoc_radio{phy_idx}'
+        option mode 'adhoc'
+        option device 'radio{phy_idx}'
+        option ifname 'wlan{phy_idx}-mesh'
+        option network 'lm_net_wlan{phy_idx}_adhoc'
+        option mcast_rate '24000'
+        option distance '1000'
+        option ssid 'LiMe'
+        option bssid 'ca:fe:00:c0:ff:ee'
+    ]], mesh_network)
+    local s = f:write(command)
+    f:close()
+    execute("wifi down; wifi up;")
+    print("connected to:"..mesh_network.channel )
+    print("wait a few seconds..")
+
+    -- The sleep comes because it takes some time to discover the mesh nodes
+    execute("sleep 4")
+    print("/connect_adhoc: "..mesh_network.channel )
 end
 
 function backup_wifi_config()
@@ -68,10 +117,10 @@ end
 function connect_11s(mesh_network)
     print("connect_11s channel: "..mesh_network.channel )
     local f = io.open("/etc/config/wireless", "w")
-    local command = string.format([[
-config wifi-device 'radio0'
+    local command = template([[
+config wifi-device 'radio{phy_idx}'
         option type 'mac80211'
-        option channel '%i'
+        option channel '{channel}'
         option hwmode '11g'
         option path 'platform/ar933x_wmac'
         option htmode 'HT20'
@@ -80,15 +129,15 @@ config wifi-device 'radio0'
         option noscan '1'
         option country 'US'
 
-config wifi-iface 'lm_wlan0_mesh_radio0'
+config wifi-iface 'lm_wlan{phy_idx}_mesh_radio{phy_idx}'
         option mode 'mesh'
-        option device 'radio0'
-        option ifname 'mesh0'
-        option network 'lm_net_wlan0_mesh'
+        option device 'radio{phy_idx}'
+        option ifname 'wlan{phy_idx}-mesh'
+        option network 'lm_net_wlan{phy_idx}_mesh'
         option distance '1000'
         option mesh_fwding '0'
         option mesh_id 'LiMe'
-    ]], mesh_network.channel)
+    ]], mesh_network)
     local s = f:write(command)
     f:close()
     execute("wifi down; wifi up;")
@@ -109,7 +158,11 @@ function connect(mesh_network)
 end
 
 function get_hosts(iface)
-    return ft.filter(function(o) return o ~= "" end, split(execute("ping6 -n -L -c 1 ${count:+-c 2} -w 1 ff02::2%"..iface.." | grep \"^64 bytes\" | awk '{print $4}' | sed \"s/:$/%"..iface.."/\""), "\n"))
+    local cmdstr = "ping6 -n -L -c 10 -w 10 ff02::2%"..iface.." | grep \"^64 bytes\" | awk '{print $4}' | sed \"s/:$/%"..iface.."/\" | sort -u"
+    print(cmdstr)
+    local cmd = execute(cmdstr)
+    print(cmd)
+    return ft.filter(function(o) return o ~= "" end, split(cmd, "\n"))
 end
 
 function fetch_config(host)
@@ -125,9 +178,9 @@ function fetch_config(host)
     end
 end
 
-function get_configs(mesh_network)
+function get_config(mesh_network)
     connect(mesh_network)
-    hosts = get_hosts("mesh0") --TODO replace mesh0 with appropiate iface
+    hosts = get_hosts("wlan"..mesh_network["phy_idx"].."-mesh") --TODO replace mesh0 with appropiate iface
     if(#hosts > 0) then
         configs = ft.map(fetch_config, hosts)
         print("Configs fetched: "..#configs)
@@ -191,6 +244,14 @@ function apply_config(config)
     execute("reboot")
 end
 
+function filter_adhoc(network)
+    return network.mode=="Ad-Hoc"
+end
+
+function filter_11s(row, index)
+    return row.mode=="Mesh Point"
+end
+
 function first_run()
     phys = get_phys()
     if (#phys == 0) then
@@ -207,29 +268,30 @@ function first_run()
         print("networks found: "..#networks)
     end
 
-    all_mesh = ft.filter(function(row, index) return row.mode=="Mesh Point" end, networks)
-    all_adhoc = ft.filter(function(row, index) return row.mode=="Ad-Hoc" end, networks)
+    all_11s = ft.filter(filter_11s, networks)
+    all_adhoc = ft.filter(filter_adhoc, networks)
 
-    if (#all_mesh == 0) then
+    amount_meshes = #all_11s + #all_adhoc
+    if (amount_meshes == 0) then
         print("no mesh network found.")
         return
     else
-        print("mesh networks found: "..#all_mesh)
+        print("mesh networks found: "..( amount_meshes ))
     end
 
     backup_wifi_config()
 
-    packed_mesh_configs = ft.map(get_configs, all_mesh)
-    all_mesh_configs = unpack_table(packed_mesh_configs)
+    packed_mesh_configs = ft.map(get_config, all_11s)
+    all_11s_configs = unpack_table(packed_mesh_configs)
 
-    restore_wifi_config()
-
-    packed_adhoc_configs = ft.map(get_configs, all_adhoc)
+    packed_adhoc_configs = ft.map(get_config, all_adhoc)
     all_adhoc_configs = unpack_table(packed_adhoc_configs)
 
-    execute("wifi down; wifi up;")
+    -- restore_wifi_config()
 
-    all_configs = unpack_table({all_mesh_configs, all_adhoc_configs})
+    -- execute("wifi down; wifi up;")
+
+    all_configs = unpack_table({all_11s_configs, all_adhoc_configs})
 
     -- apply config
 
