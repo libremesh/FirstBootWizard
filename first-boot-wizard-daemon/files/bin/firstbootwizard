@@ -24,15 +24,6 @@ function eui64(mac)
     echo -n `eui64 ]]..mac..'`')
 end
 
--- given a map of strings in values, for each key in values, replace {key} with related value
-function template(str, values)
-    local res = str
-    for key, value in pairs(values) do
-        res = string.gsub(res, "{"..key.."}", value)
-    end
-    return res
-end
-
 function file_exists(filename)
     return fs.stat(filename, "type") == "reg"
 end
@@ -66,7 +57,7 @@ function get_phys()
 end
 
 function get_networks(phys)
-    all_networks = {}
+    local all_networks = {}
     for idx, phy in pairs(phys) do
         networks = iwinfo.nl80211.scanlist(phy)
         for k,network in pairs(networks) do
@@ -78,14 +69,6 @@ function get_networks(phys)
     return all_networks
 end
 
-function chan_to_freq(chan)
-    if chan < 14 then return 2412 + 5 * (chan - 1) end
-    if chan == 14 then return 2482 end
-    if chan < 229 and chan > 31 then
-        return 5160 + 5 * (chan - 32)
-    end
-end
-
 function backup_wifi_config()
     execute("cp /etc/config/wireless /tmp/wireless-temp")
 end
@@ -94,20 +77,17 @@ function restore_wifi_config()
     execute("cp /tmp/wireless-temp /etc/config/wireless")
 end
 
-function remove_networks(uci_cursor)
-    uci_cursor:foreach("wireless", "wifi-iface", function(entry)
-        uci_cursor:delete("wireless", entry['.name'])
-    end)
-end
-
 function connect(mesh_network)
-    print("connect channel: "..mesh_network.channel )
-
     local phy_idx = mesh_network["phy_idx"]
     local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
 
     local uci_cursor = uci.cursor()
-    remove_networks(uci_cursor)
+    -- remove networks
+    uci_cursor:foreach("wireless", "wifi-iface", function(entry)
+        uci_cursor:delete("wireless", entry['.name'])
+    end)
+
+    -- set wifi config
     uci_cursor:set("wireless", 'radio'..phy_idx, "channel", mesh_network.channel)
 
     uci_cursor:set("wireless", device_name, "wifi-iface")
@@ -125,12 +105,12 @@ function connect(mesh_network)
 
     uci_cursor:commit("wireless")
 
+    -- apply wifi config
     execute("wifi down; wifi up;")
-    print("/connect: "..mesh_network.channel )
 end
 
 function fetch_config(host)
-    filename = "/tmp/lime-defaults-"..host
+    local filename = "/tmp/lime-defaults-"..host
     execute("wget http://["..host.."]/lime-defaults -O "..filename.." 2>&1")
     return file_exists(filename) and filename or nil
 end
@@ -154,7 +134,7 @@ function get_config(mesh_network)
 end
 
 function unpack_table(t)
-    unpacked = {}
+    local unpacked = {}
     for k,v in ipairs(t) do
         for sk, sv in ipairs(v) do
             unpacked[#unpacked+1] = sv
@@ -190,71 +170,29 @@ function apply_config(config)
     execute("reboot")
 end
 
-function filter_adhoc(network)
-    return network.mode=="Ad-Hoc"
-end
-
-function filter_11s(network)
-    return network.mode=="Mesh Point"
+function filter_mesh(n)
+    return n.mode == "Ad-Hoc" or n.mode == "Mesh Point"
 end
 
 function first_run()
-    phys = get_phys()
-    if (#phys == 0) then
-        print ("no wireless cards.")
-        return
-    else
-        print("cards found: "..#phys)
-    end
-    networks = get_networks(phys)
-    if (#networks == 0) then
-        print("no networks found.")
-        return
-    else
-        print("networks found: "..#networks)
-    end
-
-    all_11s = ft.filter(filter_11s, networks)
-    all_adhoc = ft.filter(filter_adhoc, networks)
-
-    amount_meshes = #all_11s + #all_adhoc
-    if (amount_meshes == 0) then
-        print("no mesh network found.")
-        return
-    else
-        print("mesh networks found: "..( amount_meshes ))
-    end
+    local phys = get_phys()
+    local all_mesh = ft.filter(filter_mesh, get_networks(phys))
 
     backup_wifi_config()
-
-    packed_mesh_configs = ft.map(get_config, all_11s)
-    all_11s_configs = unpack_table(packed_mesh_configs)
-
-    packed_adhoc_configs = ft.map(get_config, all_adhoc)
-    all_adhoc_configs = unpack_table(packed_adhoc_configs)
-
+    local all_configs = unpack_table(ft.map(get_config, all_mesh))
     restore_wifi_config()
 
     execute("wifi down; wifi up;")
 
-    all_configs = unpack_table({all_11s_configs, all_adhoc_configs})
+    local all_different_configs = ft.filter(ft.curry(are_files_different)('/etc/config/lime-defaults'), all_configs)
 
-    if (#all_configs > 0) then
-        print("going over "..#all_configs.." configs.")
-        for k, config in ipairs(all_configs) do
-            print("testing "..config)
-            if (are_files_different('/etc/config/lime-defaults', config)) then
-                print(config)
-
-                print('apply config: '..config)
-                -- apply_config(config)
-                break;
-            else
-                print("Config "..config.." is same as mine. Will try with the next one.")
-            end
-        end
+    if (#all_different_configs > 0) then
+        local config = all_different_configs[1]
+        print(config)
+        print('apply config: '..config)
+        -- apply_config(config)
     else
-        print("no config found")
+        print("no different config found")
     end
 end
 
