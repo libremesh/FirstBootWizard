@@ -187,13 +187,17 @@ function first_run()
     local equal_than_mine = ft.curry(are_files_different)('/etc/config/lime-defaults')
     local all_different_configs = ft.filter(equal_than_mine, all_configs)
 
-    if (#all_different_configs > 0) then
+    if (#all_different_configs  == 1) then
         local config = all_different_configs[1]
-        print(config)
         print('apply config: '..config)
         -- apply_config(config)
     else
-        print("no different config found")
+        if (#all_different_configs == 0) then
+            print("No different config found.")
+        end
+        if (#all_different_configs > 1) then
+            print("More than one different config, none applied.")
+        end
     end
 end
 
