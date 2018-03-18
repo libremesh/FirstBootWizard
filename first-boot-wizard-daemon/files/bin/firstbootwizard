@@ -184,7 +184,8 @@ function first_run()
 
     execute("wifi down; wifi up;")
 
-    local all_different_configs = ft.filter(ft.curry(are_files_different)('/etc/config/lime-defaults'), all_configs)
+    local equal_than_mine = ft.curry(are_files_different)('/etc/config/lime-defaults')
+    local all_different_configs = ft.filter(equal_than_mine, all_configs)
 
     if (#all_different_configs > 0) then
         local config = all_different_configs[1]
