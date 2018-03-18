@@ -3,8 +3,28 @@
 local ft = require('firstbootwizard.functools')
 local iwinfo = require("iwinfo")
 local fs = require("nixio.fs")
+local uci = require("uci")
 
--- for each key in values, replace {key} with related value
+function eui64(mac)
+    return 'fe80::'..execute([[
+    function eui64 {
+        mac="$(echo "$1" | tr -d : | tr A-Z a-z)"
+        mac="$(echo "$mac" | head -c 6)fffe$(echo "$mac" | tail -c +7)"
+        let "b = 0x$(echo "$mac" | head -c 2)"
+        let "b ^= 2"
+        printf "%02x" "$b"
+        echo "$mac" | tail -c +3 | head -c 2
+        echo -n :
+        echo "$mac" | tail -c +5 | head -c 4
+        echo -n :
+        echo "$mac" | tail -c +9 | head -c 4
+        echo -n :
+        echo "$mac" | tail -c +13
+    }
+    echo -n `eui64 ]]..mac..'`')
+end
+
+-- given a map of strings in values, for each key in values, replace {key} with related value
 function template(str, values)
     local res = str
     for key, value in pairs(values) do
@@ -24,16 +44,17 @@ function split(str, sep)
     return fields
 end
 
+-- splits a multiline string in a list of strings, one per line
+function lsplit(mlstring)
+    return split(mlstring, "\n")
+end
+
 function execute(cmd)
     local f = assert(io.popen(cmd, 'r'))
     local s = assert(f:read('*a'))
     f:close()
     return s
 end
-
--- get neighbouring nodes
-
--- search for 802.11s and adhoc networks
 
 function phy_to_idx(phy)
     local substr = string.gsub(phy, "phy", "")
@@ -57,53 +78,12 @@ function get_networks(phys)
     return all_networks
 end
 
--- connect to network
-
 function chan_to_freq(chan)
     if chan < 14 then return 2412 + 5 * (chan - 1) end
     if chan == 14 then return 2482 end
     if chan < 229 and chan > 31 then
         return 5160 + 5 * (chan - 32)
     end
-end
-
-function lsplit(mlstring)
-    return split(mlstring, "\n")
-end
-
-function connect_adhoc(mesh_network)
-    print("connect_adhoc: "..mesh_network.channel )
-    local f = io.open("/etc/config/wireless", "w")
-    local command = template([[
-config wifi-device 'radio{phy_idx}'
-        option type 'mac80211'
-        option channel '{channel}'
-        option hwmode '11g'
-        option path 'platform/ar933x_wmac'
-        option htmode 'HT20'
-        option disabled '0'
-        option distance '1000'
-        option noscan '1'
-
-config wifi-iface 'lm_wlan0_adhoc_radio{phy_idx}'
-        option mode 'adhoc'
-        option device 'radio{phy_idx}'
-        option ifname 'wlan{phy_idx}-mesh'
-        option network 'lm_net_wlan{phy_idx}_adhoc'
-        option mcast_rate '24000'
-        option distance '1000'
-        option ssid 'LiMe'
-        option bssid 'ca:fe:00:c0:ff:ee'
-    ]], mesh_network)
-    local s = f:write(command)
-    f:close()
-    execute("wifi down; wifi up;")
-    print("connected to:"..mesh_network.channel )
-    print("wait a few seconds..")
-
-    -- The sleep comes because it takes some time to discover the mesh nodes
-    execute("sleep 4")
-    print("/connect_adhoc: "..mesh_network.channel )
 end
 
 function backup_wifi_config()
@@ -114,38 +94,65 @@ function restore_wifi_config()
     execute("cp /tmp/wireless-temp /etc/config/wireless")
 end
 
+function remove_networks(uci_cursor)
+    uci_cursor:foreach("wireless", "wifi-iface", function(entry)
+        uci_cursor:delete("wireless", entry['.name'])
+    end)
+end
+
+function set_base_wifi_config(uci_cursor, network)
+    local phy_idx = network["phy_idx"]
+    local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
+
+    uci_cursor:set("wireless", device_name, "wifi-iface")
+    uci_cursor:set("wireless", device_name, "device", 'radio'..phy_idx)
+    uci_cursor:set("wireless", device_name, "ifname", 'wlan'..phy_idx..'-mesh')
+    uci_cursor:set("wireless", device_name, "network", 'lm_net_wlan'..phy_idx..'_mesh')
+    uci_cursor:set("wireless", device_name, "distance", '1000')
+end
+
+function connect_adhoc(mesh_network)
+    print("connect_adhoc: "..mesh_network.channel )
+
+    local phy_idx = mesh_network["phy_idx"]
+    local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
+
+    local uci_cursor = uci.cursor()
+    remove_networks(uci_cursor)
+    uci_cursor:set("wireless", 'radio'..phy_idx, "channel", mesh_network.channel)
+    set_base_wifi_config(uci_cursor, mesh_network)
+
+    -- specific for adhoc
+    uci_cursor:set("wireless", device_name, "mode", 'adhoc')
+    uci_cursor:set("wireless", device_name, "ssid", 'LiMe')
+    uci_cursor:set("wireless", device_name, "bssid", 'ca:fe:00:c0:ff:ee')
+    uci_cursor:set("wireless", device_name, "mcast_rate", '24000')
+
+    uci_cursor:commit("wireless")
+
+    print(execute("wifi down; wifi up;"))
+    print("/connect_adhoc: "..mesh_network.channel )
+end
+
 function connect_11s(mesh_network)
     print("connect_11s channel: "..mesh_network.channel )
-    local f = io.open("/etc/config/wireless", "w")
-    local command = template([[
-config wifi-device 'radio{phy_idx}'
-        option type 'mac80211'
-        option channel '{channel}'
-        option hwmode '11g'
-        option path 'platform/ar933x_wmac'
-        option htmode 'HT20'
-        option disabled '0'
-        option distance '1000'
-        option noscan '1'
-        option country 'US'
 
-config wifi-iface 'lm_wlan{phy_idx}_mesh_radio{phy_idx}'
-        option mode 'mesh'
-        option device 'radio{phy_idx}'
-        option ifname 'wlan{phy_idx}-mesh'
-        option network 'lm_net_wlan{phy_idx}_mesh'
-        option distance '1000'
-        option mesh_fwding '0'
-        option mesh_id 'LiMe'
-    ]], mesh_network)
-    local s = f:write(command)
-    f:close()
+    local phy_idx = mesh_network["phy_idx"]
+    local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
+
+    local uci_cursor = uci.cursor()
+    remove_networks(uci_cursor)
+    uci_cursor:set("wireless", 'radio'..phy_idx, "channel", mesh_network.channel)
+    set_base_wifi_config(uci_cursor, mesh_network)
+
+    -- specific for 11s
+    uci_cursor:set("wireless", device_name, "mode", 'mesh')
+    uci_cursor:set("wireless", device_name, "mesh_id", 'LiMe')
+    uci_cursor:set("wireless", device_name, "mesh_fwding", '0')
+
+    uci_cursor:commit("wireless")
+
     execute("wifi down; wifi up;")
-    print("connected to:"..mesh_network.channel )
-    print("wait a few seconds..")
-
-    -- The sleep comes because it takes some time to discover the mesh nodes
-    execute("sleep 4")
     print("/connect_11s: "..mesh_network.channel )
 end
 
@@ -157,40 +164,28 @@ function connect(mesh_network)
     end
 end
 
-function get_hosts(iface)
-    local cmdstr = "ping6 -n -L -c 10 -w 10 ff02::2%"..iface.." | grep \"^64 bytes\" | awk '{print $4}' | sed \"s/:$/%"..iface.."/\" | sort -u"
-    print(cmdstr)
-    local cmd = execute(cmdstr)
-    print(cmd)
-    return ft.filter(function(o) return o ~= "" end, split(cmd, "\n"))
-end
-
 function fetch_config(host)
-    print("fetch_config:"..host)
     filename = "/tmp/lime-defaults-"..host
     execute("wget http://["..host.."]/lime-defaults -O "..filename.." 2>&1")
-    if file_exists(filename) then
-        print('file fetched: '..filename)
-        return filename
-    else
-        print('file not fetched: '..filename)
-        return nil
-    end
+    return file_exists(filename) and filename or nil
+end
+
+function get_stations_macs(network)
+    return lsplit(execute('iw dev '..network..' station dump | grep ^Station | cut -d\\  -f 2'))
 end
 
 function get_config(mesh_network)
     connect(mesh_network)
-    hosts = get_hosts("wlan"..mesh_network["phy_idx"].."-mesh") --TODO replace mesh0 with appropiate iface
-    if(#hosts > 0) then
-        configs = ft.map(fetch_config, hosts)
-        print("Configs fetched: "..#configs)
-        -- removing nil configs
-        return ft.filter(function(el) return el ~= nil end, configs)
-    else
-        print ( "No hosts in network in channel: "..mesh_network.channel)
-        return {}
-    end
+    -- time for the mesh to settle
+    execute("sleep 2")
 
+    local dev_id = 'wlan'..mesh_network['phy_idx']..'-mesh'
+    local stations = get_stations_macs(dev_id)
+    local append_network = ft.curry(function (s1, s2) return s2..'%'..s1 end, 2) (dev_id)
+    local hosts = ft.map(append_network, ft.map(eui64, stations))
+
+    configs = ft.map(fetch_config, hosts)
+    return ft.filter(function(el) return el ~= nil end, configs)
 end
 
 function unpack_table(t)
@@ -214,26 +209,12 @@ end
 function clean_lime_config()
     local f = io.open("/etc/config/lime", "w")
     local command = [[
-# Read the documentation in /docs directory
-# and on http://libremesh.org
-
-### System options
-
 config lime system
-
-
-### Network general option
-
 config lime network
-
-
-### WiFi general options
-
 config lime wifi
     ]]
     local s = f:write(command)
     f:close()
-
 end
 
 function apply_config(config)
@@ -248,8 +229,8 @@ function filter_adhoc(network)
     return network.mode=="Ad-Hoc"
 end
 
-function filter_11s(row, index)
-    return row.mode=="Mesh Point"
+function filter_11s(network)
+    return network.mode=="Mesh Point"
 end
 
 function first_run()
@@ -287,13 +268,11 @@ function first_run()
     packed_adhoc_configs = ft.map(get_config, all_adhoc)
     all_adhoc_configs = unpack_table(packed_adhoc_configs)
 
-    -- restore_wifi_config()
+    restore_wifi_config()
 
-    -- execute("wifi down; wifi up;")
+    execute("wifi down; wifi up;")
 
     all_configs = unpack_table({all_11s_configs, all_adhoc_configs})
-
-    -- apply config
 
     if (#all_configs > 0) then
         print("going over "..#all_configs.." configs.")
@@ -304,6 +283,7 @@ function first_run()
 
                 print('apply config: '..config)
                 apply_config(config)
+                break;
             else
                 print("Config "..config.." is same as mine. Will try with the next one.")
             end
