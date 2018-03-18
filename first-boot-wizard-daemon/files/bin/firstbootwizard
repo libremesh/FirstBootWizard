@@ -100,68 +100,33 @@ function remove_networks(uci_cursor)
     end)
 end
 
-function set_base_wifi_config(uci_cursor, network)
-    local phy_idx = network["phy_idx"]
+function connect(mesh_network)
+    print("connect channel: "..mesh_network.channel )
+
+    local phy_idx = mesh_network["phy_idx"]
     local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
+
+    local uci_cursor = uci.cursor()
+    remove_networks(uci_cursor)
+    uci_cursor:set("wireless", 'radio'..phy_idx, "channel", mesh_network.channel)
 
     uci_cursor:set("wireless", device_name, "wifi-iface")
     uci_cursor:set("wireless", device_name, "device", 'radio'..phy_idx)
     uci_cursor:set("wireless", device_name, "ifname", 'wlan'..phy_idx..'-mesh')
     uci_cursor:set("wireless", device_name, "network", 'lm_net_wlan'..phy_idx..'_mesh')
     uci_cursor:set("wireless", device_name, "distance", '1000')
-end
 
-function connect_adhoc(mesh_network)
-    print("connect_adhoc: "..mesh_network.channel )
-
-    local phy_idx = mesh_network["phy_idx"]
-    local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
-
-    local uci_cursor = uci.cursor()
-    remove_networks(uci_cursor)
-    uci_cursor:set("wireless", 'radio'..phy_idx, "channel", mesh_network.channel)
-    set_base_wifi_config(uci_cursor, mesh_network)
-
-    -- specific for adhoc
-    uci_cursor:set("wireless", device_name, "mode", 'adhoc')
+    uci_cursor:set("wireless", device_name, "mode", mesh_network.mode == "Mesh Point" and 'mesh' or 'adhoc')
+    uci_cursor:set("wireless", device_name, "mesh_id", 'LiMe')
     uci_cursor:set("wireless", device_name, "ssid", 'LiMe')
+    uci_cursor:set("wireless", device_name, "mesh_fwding", '0')
     uci_cursor:set("wireless", device_name, "bssid", 'ca:fe:00:c0:ff:ee')
     uci_cursor:set("wireless", device_name, "mcast_rate", '24000')
 
     uci_cursor:commit("wireless")
 
-    print(execute("wifi down; wifi up;"))
-    print("/connect_adhoc: "..mesh_network.channel )
-end
-
-function connect_11s(mesh_network)
-    print("connect_11s channel: "..mesh_network.channel )
-
-    local phy_idx = mesh_network["phy_idx"]
-    local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
-
-    local uci_cursor = uci.cursor()
-    remove_networks(uci_cursor)
-    uci_cursor:set("wireless", 'radio'..phy_idx, "channel", mesh_network.channel)
-    set_base_wifi_config(uci_cursor, mesh_network)
-
-    -- specific for 11s
-    uci_cursor:set("wireless", device_name, "mode", 'mesh')
-    uci_cursor:set("wireless", device_name, "mesh_id", 'LiMe')
-    uci_cursor:set("wireless", device_name, "mesh_fwding", '0')
-
-    uci_cursor:commit("wireless")
-
     execute("wifi down; wifi up;")
-    print("/connect_11s: "..mesh_network.channel )
-end
-
-function connect(mesh_network)
-    if mesh_network.mode == "Mesh Point" then
-        connect_11s(mesh_network)
-    elseif mesh_network.mode == "Ad-Hoc" then
-        connect_adhoc(mesh_network)
-    end
+    print("/connect: "..mesh_network.channel )
 end
 
 function fetch_config(host)
@@ -282,7 +247,7 @@ function first_run()
                 print(config)
 
                 print('apply config: '..config)
-                apply_config(config)
+                -- apply_config(config)
                 break;
             else
                 print("Config "..config.." is same as mine. Will try with the next one.")
