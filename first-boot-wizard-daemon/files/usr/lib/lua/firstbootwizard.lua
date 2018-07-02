@@ -6,12 +6,6 @@ local ft = require('firstbootwizard.functools')
 local iwinfo = require("iwinfo")
 local fs = require("nixio.fs")
 local uci = require("uci")
-require("ubus")
-
-local conn = ubus.connect()
-if not conn then
-    error("Failed to connect to ubus")
-end
 
 local function execute(cmd)
     local f = assert(io.popen(cmd, 'r'))
