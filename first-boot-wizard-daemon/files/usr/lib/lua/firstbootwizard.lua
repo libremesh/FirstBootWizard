@@ -2,10 +2,15 @@
 
 local exports = {}
 
+local json = require 'luci.json'
 local ft = require('firstbootwizard.functools')
 local iwinfo = require("iwinfo")
 local fs = require("nixio.fs")
 local uci = require("uci")
+
+local function print_json(obj)
+    print(json.encode(obj))
+end
 
 local function execute(cmd)
     local f = assert(io.popen(cmd, 'r'))
@@ -34,7 +39,7 @@ local function eui64(mac)
     return 'fe80::'..execute(cmd)
 end
 
-local function file_exists(filename)
+function file_exists(filename)
     return fs.stat(filename, "type") == "reg"
 end
 
@@ -98,7 +103,7 @@ function connect(mesh_network)
     uci_cursor:set("wireless", device_name, "ifname", 'wlan'..phy_idx..'-mesh')
     uci_cursor:set("wireless", device_name, "network", 'lm_net_wlan'..phy_idx..'_mesh')
     uci_cursor:set("wireless", device_name, "distance", '1000')
-
+    -- sacar hardcode
     uci_cursor:set("wireless", device_name, "mode", mesh_network.mode == "Mesh Point" and 'mesh' or 'adhoc')
     uci_cursor:set("wireless", device_name, "mesh_id", 'LiMe')
     uci_cursor:set("wireless", device_name, "ssid", 'LiMe')
@@ -120,6 +125,26 @@ end
 
 function get_stations_macs(network)
     return lsplit(execute('iw dev '..network..' station dump | grep ^Station | cut -d\\  -f 2'))
+end
+
+local function getAp(path)
+    local uci_cursor = uci.cursor("/tmp")
+    return uci_cursor:get(path, "wifi", "ap_ssid")
+end
+
+function read_configs()
+    local tempFiles = fs.dir("/tmp/")
+    local result = {}
+    for file in tempFiles do
+        if (file ~= nil and file:sub(1, 12) == "lime-default") then
+            local ap = getAp(file)
+            table.insert(result, {
+                ap = string.gsub(ap, "\"", ""),
+                file = file
+            })
+        end
+    end
+    return result
 end
 
 function get_config(mesh_network)
@@ -181,11 +206,9 @@ end
 function exports.get_all_networks()
     local phys = get_phys()
     local all_mesh = ft.filter(filter_mesh, get_networks(phys))
-
     backup_wifi_config()
     local configs = unpack_table(ft.map(get_config, all_mesh))
     restore_wifi_config()
-
     execute("wifi down; wifi up;")
 
     local equal_than_mine = ft.curry(are_files_different)('/etc/config/lime-defaults')
