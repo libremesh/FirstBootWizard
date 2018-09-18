@@ -67,12 +67,6 @@ local methods = {
     }
 }
 
-if file_exists("/etc/first_run") then
-    print("[FBW] Lock exists, first run running")
-    conn:add(methods)
-    uloop.run()
-else 
-    print("[FBW] Lock doesn't exist. To run recreate empty file /var/lock/first_run.")   
-end
-
+conn:add(methods)
+uloop.run()
 
