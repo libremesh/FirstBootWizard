@@ -47,6 +47,22 @@ local methods = {
                 }
                 conn:reply(req, status) 
             end, {}
+        },
+        set_network = {
+            function(req, msg)
+                -- copy tmp file
+                -- apply lime config
+                -- remove lock
+                -- return response
+            end, { file = ubus.STRING }
+        },
+        create_network = {
+            function(req, msg)
+                -- set lime default
+                -- applly config
+                -- remove lock
+                -- return response
+            end, { name = ubus.STRING }   
         }
     }
 }
