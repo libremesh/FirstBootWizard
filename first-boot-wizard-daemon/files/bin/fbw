@@ -17,10 +17,10 @@ local methods = {
             function(req, msg)
                 local scan_file = check_scan_file()
                 local status
-                if(scan_file == nil) then
+                if(scan_file == nil) or (msg.scan == true) then
                     os.execute("(( /usr/bin/lua /bin/firstbootwizard 0<&- &>/dev/null &) &)")
                 end
-                if (scan_file == nil) or (scan_file == "true") then
+                if (scan_file == nil) or (scan_file == "true") or (msg.scan == true) then
                     status = 'scanning'
                 else
                     status = 'scanned' 
