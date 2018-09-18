@@ -1,12 +1,12 @@
 #!/usr/bin/lua
 
-local exports = {}
-
 local json = require 'luci.json'
 local ft = require('firstbootwizard.functools')
 local iwinfo = require("iwinfo")
+local wireless = require("lime.wireless")
 local fs = require("nixio.fs")
 local uci = require("uci")
+local nixio = require "nixio"
 
 local function print_json(obj)
     print(json.encode(obj))
@@ -60,14 +60,19 @@ local function phy_to_idx(phy)
     return tonumber(substr)
 end
 
-function get_phys()
-    return split(execute("ls /sys/class/ieee80211"), "\n")
-end
-
-function get_networks(phys)
+function get_networks()
+    local allRadios = wireless.scandevices()
     local all_networks = {}
+    local phys = {}
+    for _, radio in pairs (allRadios) do
+        if wireless.is5Ghz(radio[".name"]) then
+            phys[#phys+1] = "phy"..radio[".index"]
+        end
+    end
+    nixio.syslog("crit", "FBW phys"..json.encode(phys))
     for idx, phy in pairs(phys) do
         networks = iwinfo.nl80211.scanlist(phy)
+        nixio.syslog("crit", "FBW networs"..json.encode(networks))
         for k,network in pairs(networks) do
             network["phy"] = phy
             network["phy_idx"] = phy_to_idx(phy)
@@ -88,6 +93,7 @@ end
 function connect(mesh_network)
     local phy_idx = mesh_network["phy_idx"]
     local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
+    local mode = mesh_network.mode == "Mesh Point" and 'mesh' or 'adhoc'
 
     local uci_cursor = uci.cursor()
     -- remove networks
@@ -100,11 +106,10 @@ function connect(mesh_network)
 
     uci_cursor:set("wireless", device_name, "wifi-iface")
     uci_cursor:set("wireless", device_name, "device", 'radio'..phy_idx)
-    uci_cursor:set("wireless", device_name, "ifname", 'wlan'..phy_idx..'-mesh')
-    uci_cursor:set("wireless", device_name, "network", 'lm_net_wlan'..phy_idx..'_mesh')
+    uci_cursor:set("wireless", device_name, "ifname", 'wlan'..phy_idx..'-'..mode)
+    uci_cursor:set("wireless", device_name, "network", 'lm_net_wlan'..phy_idx..'_'..mode)
     uci_cursor:set("wireless", device_name, "distance", '1000')
-    -- sacar hardcode
-    uci_cursor:set("wireless", device_name, "mode", mesh_network.mode == "Mesh Point" and 'mesh' or 'adhoc')
+    uci_cursor:set("wireless", device_name, "mode", mode)
     uci_cursor:set("wireless", device_name, "mesh_id", 'LiMe')
     uci_cursor:set("wireless", device_name, "ssid", 'LiMe')
     uci_cursor:set("wireless", device_name, "mesh_fwding", '0')
@@ -190,7 +195,7 @@ config lime wifi
     f:close()
 end
 
-function exports.apply_config(config)
+function apply_config(config)
     conn:call("log", "write", { event = "fbw: "..config })
     -- execute("cp "..config.." /etc/config/lime-defaults")
     -- clean_lime_config()
@@ -203,9 +208,38 @@ function filter_mesh(n)
     return n.mode == "Ad-Hoc" or n.mode == "Mesh Point"
 end
 
-function exports.get_all_networks()
-    local phys = get_phys()
-    local all_mesh = ft.filter(filter_mesh, get_networks(phys))
+local function start_scan_file()
+    local file = io.open("/tmp/scanning", "w")
+    file:write("true")
+    file:close()
+end
+
+local function stop_scan()
+    local file = io.open("/tmp/scanning", "w")
+    file:write("false")
+    file:close()
+end
+
+function check_scan_file()
+    local file = io.open("/tmp/scanning", "r")
+    if(file == nil) then
+        return nil
+    end
+    return assert(file:read("*a"), nil)
+end
+
+function check_lock_file()
+    local file = io.open("/etc/first_run", "r")
+    if(file == nil) then
+        return false
+    end
+    return true
+end    
+
+function get_all_networks()
+    start_scan_file()
+    local all_mesh = ft.filter(filter_mesh, get_networks())
+    nixio.syslog("crit", "FBW MESH"..json.encode(all_mesh))
     backup_wifi_config()
     local configs = unpack_table(ft.map(get_config, all_mesh))
     restore_wifi_config()
@@ -213,25 +247,5 @@ function exports.get_all_networks()
 
     local equal_than_mine = ft.curry(are_files_different)('/etc/config/lime-defaults')
     -- local configs = ft.filter(equal_than_mine, configs)
-
-    return configs
+    stop_scan()
 end
-
-function first_run()
-    local all_different_configs = exports.get_all_networks()
-
-    if (#all_different_configs  == 1) then
-        local config = all_different_configs[1]
-        print('apply config: '..config)
-        -- exports.apply_config(config)
-    else
-        if (#all_different_configs == 0) then
-            print("No different config found.")
-        end
-        if (#all_different_configs > 1) then
-            print("More than one different config, none applied.")
-        end
-    end
-end
-
-return exports

@@ -1,0 +1,62 @@
+#!/usr/bin/lua
+
+require "ubus"
+require "uloop"
+local fbw = require 'firstbootwizard'
+
+uloop.init()
+
+local conn = ubus.connect()
+if not conn then
+	error("Failed to connect to ubus")
+end
+
+local methods = {
+    firstbootwizard = {
+        search_networks = {
+            function(req, msg)
+                local scan_file = check_scan_file()
+                local status
+                if(scan_file == nil) then
+                    os.execute("(( /usr/bin/lua /bin/firstbootwizard 0<&- &>/dev/null &) &)")
+                end
+                if (scan_file == nil) or (scan_file == "true") then
+                    status = 'scanning'
+                else
+                    status = 'scanned' 
+                end
+                conn:reply(req, {status= status, networks = read_configs()})
+
+            end, { scan = ubus.BOOLEAN}
+        },
+        status = {
+            function(req, msg)
+                local scan_status
+                local scan_file = check_scan_file()
+                -- if no scan file return 0
+                if scan_file == nil then scan_status = 0
+                -- if scanning return 1
+                elseif scan_file == "true" then scan_status = 1
+                -- if done scanning return 2
+                elseif scan_file == "false" then scan_status = 2
+                end
+                local lock_file = check_lock_file()
+                local status = {
+                    lock = lock_file,
+                    scan = scan_status
+                }
+                conn:reply(req, status) 
+            end, {}
+        }
+    }
+}
+
+if file_exists("/etc/first_run") then
+    print("[FBW] Lock exists, first run running")
+    conn:add(methods)
+    uloop.run()
+else 
+    print("[FBW] Lock doesn't exist. To run recreate empty file /var/lock/first_run.")   
+end
+
+

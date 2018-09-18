@@ -1,5 +1,5 @@
 {
-    "firstbootwizard": {
+    "lime-app": {
         "description": "firstbootwizard ubus interface auth",
         "read": {
             "ubus": {
