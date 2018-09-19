@@ -3,6 +3,8 @@
 require "ubus"
 require "uloop"
 local fbw = require 'firstbootwizard'
+local nixio = require "nixio"
+local json = require 'luci.json'
 
 uloop.init()
 
@@ -23,11 +25,11 @@ local methods = {
                 if (scan_file == nil) or (scan_file == "true") or (msg.scan == true) then
                     status = 'scanning'
                 else
-                    status = 'scanned' 
+                    status = 'scanned'
                 end
                 conn:reply(req, {status= status, networks = read_configs()})
 
-            end, { scan = ubus.BOOLEAN}
+            end, { scan = ubus.BOOLEAN }
         },
         status = {
             function(req, msg)
@@ -45,28 +47,39 @@ local methods = {
                     lock = lock_file,
                     scan = scan_status
                 }
-                conn:reply(req, status) 
+                conn:reply(req, status)
             end, {}
         },
         set_network = {
             function(req, msg)
-                -- copy tmp file
+                -- get configs form tmp file
+                local config = read_configs()
                 -- apply lime config
+                apply_config(config)
                 -- remove lock
+                remove_lock_file()
                 -- return response
+                conn:reply(req, config)
             end, { file = ubus.STRING }
         },
         create_network = {
             function(req, msg)
+                local configs = {}
+                if (msg.name ~= nil) then
+                    configs["ssid"] = msg.name
+                end
                 -- set lime default
-                -- applly config
+                if (configs ~= nil) then
+                    apply_user_configs(configs)
+                end
                 -- remove lock
+                -- remove_lock_file()
                 -- return response
-            end, { name = ubus.STRING }   
+                conn:reply(req, configs)
+            end, { name = ubus.STRING }
         }
     }
 }
 
 conn:add(methods)
 uloop.run()
-
