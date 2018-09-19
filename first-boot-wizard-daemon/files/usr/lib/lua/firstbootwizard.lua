@@ -50,6 +50,12 @@ function file_exists(filename)
     return fs.stat(filename, "type") == "reg"
 end
 
+local function check_file_exists(file)
+    local f = io.open(file, "rb")
+    if f then f:close() end
+    return f ~= nil
+end  
+
 local function split(str, sep)
     local sep, fields = sep or ":", {}
     local pattern = string.format("([^%s]+)", sep)
@@ -93,7 +99,8 @@ function get_networks()
             all_networks[#all_networks+1] = network
         end
     end
-    return ft.filter(function(el) return #ft.filter(function(locbssid) return locbssid == el end, thisBssids) < 1 end, all_networks)
+    return all_networks
+    -- return ft.filter(function(el) return #ft.filter(function(locbssid) return locbssid == el end, thisBssids) < 1 end, all_networks)
 end
 
 function backup_wifi_config()
@@ -170,6 +177,14 @@ function read_configs()
     return result
 end
 
+function read_file(file)
+    local lines = lines_from("/tmp/"..file)
+    -- for k,v in pairs(lines) do
+    --     nixio.syslog("crit", 'line[' .. k .. ']'..v)
+    -- end
+    return lines
+end
+
 local function tableEmpty(self)
     for _, _ in pairs(self) do
         return false
@@ -189,7 +204,7 @@ function get_config(mesh_network)
         isAssociated = iwinfo.nl80211.assoclist(dev_id)
         -- nixio.syslog("crit", "FBW trying to associate "..json.encode(isAssociated)..i)
         i = i + 1
-        os.execute("sleep 2s")
+        os.execute("sleep 5s")
     end
     local stations = get_stations_macs(dev_id)
     
@@ -228,21 +243,27 @@ end
 function clean_lime_config()
     local f = io.open("/etc/config/lime", "w")
     local command = [[
-config lime system
-config lime network
-config lime wifi
+        config lime system
+        config lime network
+        config lime wifi
     ]]
     local s = f:write(command)
     f:close()
 end
 
-function apply_config(config)
-    conn:call("log", "write", { event = "fbw: "..config })
-    -- execute("cp "..config.." /etc/config/lime-defaults")
-    -- clean_lime_config()
-    -- execute("/rom/etc/uci-defaults/91_lime-config")
-    -- execute("rm /var/lock/first_run")
-    -- execute("reboot")
+function apply_config(file)
+    -- TODO: check if config is valid
+    local filePath = "/tmp/"..file
+    check_file_exists(filePath)
+    nixio.syslog("crit", "FBW FILE EXISTS ")
+    execute("cp "..filePath.." /etc/config/lime-defaults")
+    nixio.syslog("crit", "FBW FILE COPIED ")
+    clean_lime_config()
+    nixio.syslog("crit", "FBW LIME CONFIG CLEANED ")
+    execute("/rom/etc/uci-defaults/91_lime-config")
+    execute("rm /etc/first_run")
+    nixio.syslog("crit", "APPLY CONFIGS ")
+    os.execute("(( /usr/bin/lime-config && /usr/bin/lime-apply && reboot 0<&- &>/dev/null &) &)")
 end
 
 function filter_mesh(n)
