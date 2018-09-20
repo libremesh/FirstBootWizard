@@ -53,12 +53,11 @@ local methods = {
         set_network = {
             function(req, msg)
                 local file = msg.file
-                -- get configs form tmp file
                 -- apply lime config
                 conn:reply(req, { status = 'configuring' })
                 -- os.execute('sleep 2s')
                 apply_config(file)
-                -- remove lock
+                -- remove lock?
                 -- remove_lock_file()
             end, { file = ubus.STRING }
         },
@@ -68,14 +67,12 @@ local methods = {
                 if (msg.name ~= nil) then
                     configs["ssid"] = msg.name
                 end
-                -- set lime default
                 if (configs ~= nil) then
                     apply_user_configs(configs)
                 end
-                -- remove lock
+                -- remove lock?
                 -- remove_lock_file()
-                -- return response
-                conn:reply(req, configs)
+                conn:reply(req, { status = 'done' })
             end, { name = ubus.STRING }
         }
     }

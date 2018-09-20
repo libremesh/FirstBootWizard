@@ -305,7 +305,7 @@ end
 function apply_user_configs(configs)
     local ssid = configs.ssid
     local uci_cursor = uci.cursor()
-    print(ssid)
+    nixio.syslog("crit", "FBW apply_user_configs ssid "..ssid)
     uci_cursor:set("lime-defaults", 'wifi', 'ap_ssid', ssid)
     uci_cursor:commit("lime-defaults")
     -- apply wifi config
