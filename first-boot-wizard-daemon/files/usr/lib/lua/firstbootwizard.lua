@@ -77,18 +77,18 @@ function get_networks()
     local thisBssids = {}
     local wirelessConfig = conn:call("network.wireless", "status", {})
     local allRadios = wireless.scandevices()
-    -- nixio.syslog("crit", "FBW radios "..json.encode(allRadios))
+    nixio.syslog("crit", "FBW radios "..json.encode(allRadios))
     local all_networks = {}
     local phys = {}
     for _, radio in pairs (allRadios) do
         if wireless.is5Ghz(radio[".name"]) then
             local phyIndex = radio[".name"].sub(radio[".name"], -1)
             phys[#phys+1] = "phy"..phyIndex
-            -- nixio.syslog("crit", "FBW thisBssids"..json.encode(wirelessConfig["radio"..phyIndex]))
+            nixio.syslog("crit", "FBW thisBssids"..json.encode(wirelessConfig["radio"..phyIndex]))
             table.insert(thisBssids, wirelessConfig["radio"..phyIndex].interfaces[1].config.bssid)
         end
     end
-    nixio.syslog("crit", "FBW thisBssids"..json.encode(thisBssids))
+    -- nixio.syslog("crit", "FBW thisBssids"..json.encode(thisBssids))
     -- nixio.syslog("crit", "FBW phys"..json.encode(phys))
     for idx, phy in pairs(phys) do
         networks = iwinfo.nl80211.scanlist(phy)
@@ -116,8 +116,8 @@ function connect(mesh_network)
     local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
     local mode = mesh_network.mode == "Mesh Point" and 'mesh' or 'adhoc'
 
-    -- nixio.syslog("crit", "FBW Connection to "..mesh_network.ssid)
-    -- nixio.syslog("crit", "FBW in "..device_name)
+    nixio.syslog("crit", "FBW Connection to "..mesh_network.ssid)
+    nixio.syslog("crit", "FBW in "..device_name)
 
     local uci_cursor = uci.cursor()
     -- remove networks
@@ -141,13 +141,15 @@ function connect(mesh_network)
 
     uci_cursor:commit("wireless")
 
+    nixio.syslog("crit", "FBW applying WIFI ")
     -- apply wifi config
-    execute("wifi down; wifi up;")
+    execute("wifi down; wifi up")
 end
 
 function fetch_config(host)
     local filename = "/tmp/lime-defaults-"..host
     nixio.syslog("crit", "FBW fetching "..host)
+    os.execute("sleep 5s")
     os.execute("/bin/wget http://["..host.."]/lime-defaults -O "..filename.." &")
     return file_exists(filename) and filename or nil
 end
@@ -202,7 +204,7 @@ function get_config(mesh_network)
     local i = 0
     while (tableEmpty(isAssociated)) and i < 5 do
         isAssociated = iwinfo.nl80211.assoclist(dev_id)
-        -- nixio.syslog("crit", "FBW trying to associate "..json.encode(isAssociated)..i)
+        nixio.syslog("crit", "FBW trying to associate "..json.encode(isAssociated)..i)
         i = i + 1
         os.execute("sleep 5s")
     end
@@ -211,9 +213,9 @@ function get_config(mesh_network)
     local append_network = ft.curry(function (s1, s2) return s2..'%'..s1 end, 2) (dev_id)
     local linksLocalIpv6 = ft.map(eui64, stations)
     local hosts = ft.map(append_network, linksLocalIpv6)
-    -- nixio.syslog("crit", "FBW DEV ID "..json.encode(dev_id))
-    -- nixio.syslog("crit", "FBW LINKS LOCALS "..json.encode(linksLocalIpv6))
-    -- nixio.syslog("crit", "FBW HOSTS "..json.encode(hosts))
+    nixio.syslog("crit", "FBW DEV ID "..json.encode(dev_id))
+    nixio.syslog("crit", "FBW LINKS LOCALS "..json.encode(linksLocalIpv6))
+    nixio.syslog("crit", "FBW HOSTS "..json.encode(hosts))
     local function printHost (host)
         print(host.name)
     end
