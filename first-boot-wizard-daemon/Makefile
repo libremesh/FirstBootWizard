@@ -12,7 +12,7 @@ define Package/$(PKG_NAME)
     CATEGORY:=LiMe
     MAINTAINER:=Nicolas Pace <nico@libre.ws>
     URL:=http://libremesh.org
-    DEPENDS:=
+
 endef
 
 define Package/$(PKG_NAME)/description
