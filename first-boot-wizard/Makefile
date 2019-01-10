@@ -1,10 +1,11 @@
 include $(TOPDIR)/rules.mk
-include $(INCLUDE_DIR)/package.mk
 
-PKG_NAME:=first-boot-wizard-gui
+PKG_NAME:=first-boot-wizard
 PKG_VERSION=$(GIT_COMMIT_DATE)-$(GIT_COMMIT_TSTAMP)
 GIT_COMMIT_DATE:=$(shell git log -n 1 --pretty=%ad --date=short . )
 GIT_COMMIT_TSTAMP:=$(shell git log -n 1 --pretty=%at . )
+
+include $(INCLUDE_DIR)/package.mk
 
 define Package/$(PKG_NAME)
     TITLE:=$(PKG_NAME)
@@ -15,7 +16,7 @@ define Package/$(PKG_NAME)
 endef
 
 define Package/$(PKG_NAME)/description
-    Allows the user to initialize a new network.
+    Scans surrounding LibreMesh networks and joins them.
 endef
 
 define Build/Compile

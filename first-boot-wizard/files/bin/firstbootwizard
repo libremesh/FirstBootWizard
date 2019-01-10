@@ -1,0 +1,6 @@
+#!/usr/bin/lua
+
+local fbw = require('firstbootwizard')
+
+print("[FBW] start.")
+get_all_networks()
