@@ -1,0 +1,12 @@
+#!/usr/bin/lua
+
+local fbw = require('firstbootwizard')
+
+
+print("[FBW] start.")
+if file_exists("/var/lock/first_run") then
+    print("[FBW] Lock exists, first run running")
+    fbw.first_run()
+else
+    print("[FBW] Lock doesn't exist. To run recreate empty file /var/lock/first_run.")
+end

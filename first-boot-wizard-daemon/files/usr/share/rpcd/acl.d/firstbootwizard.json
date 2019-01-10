@@ -1,0 +1,15 @@
+{
+    "firstbootwizard": {
+        "description": "firstbootwizard ubus interface auth",
+        "read": {
+            "ubus": {
+                    "firstbootwizard": [ "*" ]
+            }
+        },
+        "write": {
+            "ubus": {
+                    "firstbootwizard": [ "*" ]
+            }
+        }
+    }
+}
