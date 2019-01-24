@@ -143,7 +143,7 @@ function connect(mesh_network)
 
     nixio.syslog("crit", "FBW applying WIFI ")
     -- apply wifi config
-    execute("wifi down; wifi up")
+    execute("wifi down radio"..phy_idx.."; wifi up radio"..phy_idx)
 end
 
 function fetch_config(host)
