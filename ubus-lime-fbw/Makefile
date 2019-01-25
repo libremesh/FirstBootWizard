@@ -23,8 +23,8 @@ endef
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/
 	$(CP) ./files/* $(1)/
-	@chmod a+x $(1)/usr/libexec/rpcd/lime-fbw
-  @chmod a+x $(1)/etc/init.d/ubus-lime-fbw
+	@chmod a+x $(1)/usr/libexec/daemon/lime-fbw
+	@chmod a+x $(1)/etc/init.d/ubus-lime-fbw
 endef
 
 $(eval $(call BuildPackage,$(PKG_NAME)))
