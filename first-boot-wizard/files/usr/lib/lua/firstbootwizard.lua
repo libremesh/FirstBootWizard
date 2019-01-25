@@ -146,8 +146,12 @@ function connect(mesh_network)
     execute("wifi down radio"..phy_idx.."; wifi up radio"..phy_idx)
 end
 
-function fetch_config(host)
-    local filename = "/tmp/lime-defaults-"..host
+function fetch_config(data)
+    print(json.encode(data))
+    local host = data.host
+    local signal = data.signal
+    local ssid = data.ssid
+    local filename = "/tmp/lime-defaults__signal__"..(signal * -1).."__ssid__"..ssid.."__host__"..host
     nixio.syslog("crit", "FBW fetching "..host)
     os.execute("sleep 5s")
     os.execute("/bin/wget http://["..host.."]/lime-defaults -O "..filename.." &")
@@ -161,7 +165,11 @@ end
 
 local function getAp(path)
     local uci_cursor = uci.cursor("/tmp")
-    return uci_cursor:get(path, "wifi", "ap_ssid")
+    local ap_ssid = uci_cursor:get(path, "wifi", "ap_ssid")
+    if ap_ssid ~= nil then
+	return ap_ssid
+    end
+    return ""
 end
 
 function read_configs()
@@ -170,6 +178,7 @@ function read_configs()
     for file in tempFiles do
         if (file ~= nil and file:sub(1, 12) == "lime-default") then
             local ap = getAp(file)
+	    print(file)
             table.insert(result, {
                 ap = string.gsub(ap, "\"", ""),
                 file = file
@@ -216,11 +225,14 @@ function get_config(mesh_network)
     nixio.syslog("crit", "FBW DEV ID "..json.encode(dev_id))
     nixio.syslog("crit", "FBW LINKS LOCALS "..json.encode(linksLocalIpv6))
     nixio.syslog("crit", "FBW HOSTS "..json.encode(hosts))
-    local function printHost (host)
-        print(host.name)
+    
+    local function addData (host)
+    	return {host = host, signal = mesh_network.signal, ssid = mesh_network.ssid }
     end
-    ft.map(printHost, hosts)
-    configs = ft.map(fetch_config, hosts)
+
+    local data = ft.map(addData, hosts)
+
+    configs = ft.map(fetch_config, data)
     return ft.filter(function(el) return el ~= nil end, configs)
 end
 
@@ -258,6 +270,7 @@ function apply_config(file)
     local filePath = "/tmp/"..file
     check_file_exists(filePath)
     nixio.syslog("crit", "FBW FILE EXISTS ")
+    execute("rm /etc/config/lime")
     execute("cp "..filePath.." /etc/config/lime-defaults")
     nixio.syslog("crit", "FBW FILE COPIED ")
     clean_lime_config()
