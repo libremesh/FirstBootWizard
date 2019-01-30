@@ -2,5 +2,5 @@
 
 local fbw = require('firstbootwizard')
 
-print("[FBW] start.")
+print("[FBW] Scanning...")
 get_all_networks()
