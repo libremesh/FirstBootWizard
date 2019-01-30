@@ -94,9 +94,11 @@ function get_networks()
         networks = iwinfo.nl80211.scanlist(phy)
         nixio.syslog("crit", "FBW networs"..json.encode(networks))
         for k,network in pairs(networks) do
-            network["phy"] = phy
-            network["phy_idx"] = phy_to_idx(phy)
-            all_networks[#all_networks+1] = network
+            if network.signal ~= -256 then
+                network["phy"] = phy
+                network["phy_idx"] = phy_to_idx(phy)
+                all_networks[#all_networks+1] = network
+            end
         end
     end
     return all_networks
@@ -109,12 +111,19 @@ end
 
 function restore_wifi_config()
     execute("cp /tmp/wireless-temp /etc/config/wireless")
+    local allRadios = wireless.scandevices()
+    for _, radio in pairs (allRadios) do
+        if wireless.is5Ghz(radio[".name"]) then
+            local phyIndex = radio[".name"].sub(radio[".name"], -1)
+            execute("wifi down radio"..phyIndex.."; wifi up radio"..phyIndex)
+        end
+    end
 end
 
 function connect(mesh_network)
     local phy_idx = mesh_network["phy_idx"]
-    local device_name = "lm_wlan"..phy_idx.."adhoc_radio"..phy_idx
     local mode = mesh_network.mode == "Mesh Point" and 'mesh' or 'adhoc'
+    local device_name = "lm_wlan"..phy_idx..""..mode.."_radio"..phy_idx
 
     nixio.syslog("crit", "FBW Connection to "..mesh_network.ssid)
     nixio.syslog("crit", "FBW in "..device_name)
@@ -122,7 +131,9 @@ function connect(mesh_network)
     local uci_cursor = uci.cursor()
     -- remove networks
     uci_cursor:foreach("wireless", "wifi-iface", function(entry)
-        uci_cursor:delete("wireless", entry['.name'])
+        if entry['.name'] == device_name then
+            uci_cursor:delete("wireless", entry['.name']) 
+        end
     end)
 
     -- set wifi config
@@ -337,13 +348,12 @@ end
 function get_all_networks()
     start_scan_file()
     local networks = get_networks()
-    ft.map(printParam('FBW MESH - All Network ssid','ssid'), networks)
+    ft.map(printParam('FBW MESH - All Networlk ssid','ssid'), networks)
     local all_mesh = ft.filter(filter_mesh, networks)
     ft.map(printParam('FBW MESH - Only mesh Network ssid','ssid'), all_mesh)
     backup_wifi_config()
     local configs = unpack_table(ft.map(get_config, all_mesh))
     restore_wifi_config()
-    execute("wifi down; wifi up;")
 
     local equal_than_mine = ft.curry(are_files_different)('/etc/config/lime-defaults')
     -- local configs = ft.filter(equal_than_mine, configs)
