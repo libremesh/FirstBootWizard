@@ -10,13 +10,13 @@ include $(INCLUDE_DIR)/package.mk
 define Package/$(PKG_NAME)
     TITLE:=$(PKG_NAME)
     CATEGORY:=LiMe
-    MAINTAINER:=Nicolas Pace <nico@libre.ws>
+    MAINTAINER:=Marcos Gutierrez <gmarcos87@gmail.com>
     URL:=http://libremesh.org
 
 endef
 
 define Package/$(PKG_NAME)/description
-    Scans surrounding LibreMesh networks and joins them.
+	Scans surrounding LibreMesh networks and joins them.
 endef
 
 define Build/Compile
