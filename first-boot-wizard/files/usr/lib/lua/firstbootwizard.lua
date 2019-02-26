@@ -323,13 +323,22 @@ function remove_lock_file()
 end
 
 function apply_user_configs(configs)
-    local ssid = configs.ssid
+    local name = configs.ssid
     local uci_cursor = uci.cursor()
     -- nixio.syslog("crit", "FBW apply_user_configs ssid "..ssid)
-    uci_cursor:set("lime-defaults", 'wifi', 'ap_ssid', ssid)
+    uci_cursor:set("lime-defaults", 'wifi', 'ap_ssid', name)
+    uci_cursor:set("lime-defaults", 'wifi', 'apname_ssid', name..'/%H')
+    uci_cursor:set("lime-defaults", 'wifi', 'adhoc_ssid', 'LiMe.'..name..'/%H')
+    uci_cursor:set("lime-defaults", 'wifi', 'ieee80211s_mesh_id', 'LiMe.'..name..'/%H')
     uci_cursor:commit("lime-defaults")
-    -- apply wifi config
-    execute("wifi down; wifi up;")
+
+    -- Apply config and reboot
+    execute("rm /etc/config/lime")
+    clean_lime_config()
+    execute("/rom/etc/uci-defaults/91_lime-config")
+    execute("rm /etc/first_run")
+    os.execute("(( /usr/bin/lime-config && /usr/bin/lime-apply && reboot 0<&- &>/dev/null &) &)")
+
     return { configs = configs }
 end
 
